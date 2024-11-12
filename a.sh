@@ -1,0 +1,98 @@
+export GIT_AUTHOR_DATE="$(date -d '2024-11-12 16:37:44')"
+export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+
+# Update docker-compose.yml for microservices
+cat > docker-compose.yml << 'EOF'
+version: '3.8'
+
+services:
+  # API Gateway
+  api-gateway:
+    build: ./packages/api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - PRODUCTS_SERVICE_URL=http://products-service:3002
+      - ORDERS_SERVICE_URL=http://orders-service:3003
+      - PAYMENTS_SERVICE_URL=http://payments-service:3004
+    depends_on:
+      - auth-service
+      - products-service
+      - orders-service
+      - payments-service
+    restart: unless-stopped
+
+  # Auth Service
+  auth-service:
+    build: ./packages/auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongo:27017/lemonstand-auth
+      - JWT_SECRET=your_jwt_secret_here
+      - JWT_EXPIRES_IN=90d
+      - EMAIL_HOST=smtp.gmail.com
+      - EMAIL_PORT=587
+      - EMAIL_USERNAME=your_email@gmail.com
+      - EMAIL_PASSWORD=your_email_password
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  # Products Service (placeholder)
+  products-service:
+    image: node:16-alpine
+    command: sh -c "echo 'Products service starting...' && sleep 3600"
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+
+  # Orders Service (placeholder)
+  orders-service:
+    image: node:16-alpine
+    command: sh -c "echo 'Orders service starting...' && sleep 3600"
+    ports:
+      - "3003:3003"
+    restart: unless-stopped
+
+  # Payments Service (placeholder)
+  payments-service:
+    image: node:16-alpine
+    command: sh -c "echo 'Payments service starting...' && sleep 3600"
+    ports:
+      - "3004:3004"
+    restart: unless-stopped
+
+  # MongoDB
+  mongo:
+    image: mongo:5
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=lemonstand
+    restart: unless-stopped
+
+  # Redis
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  redis_data:
+EOF
+
+git add .
+git commit -m "devops: update docker-compose for microservices architecture"
+
+unset GIT_AUTHOR_DATE
+unset GIT_COMMITTER_DATE
