@@ -23,5 +23,9 @@
     "jest": "^30.0.5",
     "mongodb-memory-server": "^10.2.0",
     "supertest": "^7.1.4"
+  },
+  "dependencies": {
+    "express-prom-bundle": "^8.0.0",
+    "prom-client": "^15.1.3"
   }
 }

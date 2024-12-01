@@ -5,6 +5,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const axios = require('axios');
+const { metricsMiddleware, metricsEndpoint } = require('./monitoring');
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10kb' }));
+app.use(metricsMiddleware);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -47,6 +49,9 @@ const serviceDiscovery = async (req, res, next) => {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', service: 'api-gateway' });
 });
+
+// Metrics endpoint
+app.get('/metrics', metricsEndpoint);
 
 // Proxy middleware with service discovery
 app.use('/api/v1/:service', serviceDiscovery, (req, res) => {

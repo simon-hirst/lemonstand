@@ -1,4 +1,6 @@
 const express = require('express');
+const { metricsMiddleware, metricsEndpoint } = require('./monitoring');
+
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -14,6 +16,8 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10kb' }));
+app.use(metricsMiddleware);
+
 
 // Routes
 app.use('/products', productRoutes);
@@ -21,6 +25,9 @@ app.use('/categories', categoryRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
+
+app.get('/metrics', metricsEndpoint);
+
   res.status(200).json({ status: 'OK', service: 'products-service' });
 });
 

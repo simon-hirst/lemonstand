@@ -1,113 +1,69 @@
-export GIT_AUTHOR_DATE="$(date -d '2024-11-28 10:44:26')"
+export GIT_AUTHOR_DATE="$(date -d '2024-12-01 20:11:53')"
 export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
 
-# Create a service registry and health check system
-cd lemonstand-platform
-mkdir packages/service-registry
+# Add Prometheus monitoring to all services
+cd packages/api-gateway
+npm install prom-client express-prom-bundle
 
-# Create service registry package
-npx lerna create @lemonstand/service-registry --yes
-cd packages/service-registry
+# Add monitoring to API Gateway
+cat > src/monitoring.js << 'EOF'
+const promBundle = require('express-prom-bundle');
+const client = require('prom-client');
 
-# Install dependencies
-npm install express axios
+// Create metrics
+const httpRequestDurationMicroseconds = new client.Histogram({
+  name: 'http_request_duration_ms',
+  help: 'Duration of HTTP requests in ms',
+  labelNames: ['method', 'route', 'code'],
+  buckets: [0.1, 5, 15, 50, 100, 300, 500, 1000, 3000, 5000]
+});
 
-# Create service registry
-cat > src/app.js << 'EOF'
-const express = require('express');
-const axios = require('axios');
+const httpRequestsTotal = new client.Counter({
+  name: 'http_requests_total',
+  help: 'Total number of HTTP requests',
+  labelNames: ['method', 'route', 'code']
+});
 
-const app = express();
-app.use(express.json());
+const activeUsers = new client.Gauge({
+  name: 'active_users',
+  help: 'Number of active users'
+});
 
-// Service registry
-const services = {
-  'auth-service': { url: process.env.AUTH_SERVICE_URL || 'http://localhost:3001', healthy: false },
-  'products-service': { url: process.env.PRODUCTS_SERVICE_URL || 'http://localhost:3002', healthy: false },
-  'orders-service': { url: process.env.ORDERS_SERVICE_URL || 'http://localhost:3003', healthy: false },
-  'payments-service': { url: process.env.PAYMENTS_SERVICE_URL || 'http://localhost:3004', healthy: false },
-  'email-service': { url: process.env.EMAIL_SERVICE_URL || 'http://localhost:3005', healthy: false }
-};
-
-// Health check function
-const checkServiceHealth = async (serviceName, serviceUrl) => {
-  try {
-    const response = await axios.get(`${serviceUrl}/health`, { timeout: 5000 });
-    services[serviceName].healthy = response.status === 200;
-    services[serviceName].lastChecked = new Date().toISOString();
-    console.log(`Service ${serviceName} is healthy`);
-  } catch (error) {
-    services[serviceName].healthy = false;
-    services[serviceName].lastChecked = new Date().toISOString();
-    console.error(`Service ${serviceName} is unhealthy:`, error.message);
+// Metrics middleware
+const metricsMiddleware = promBundle({
+  includeMethod: true,
+  includePath: true,
+  includeStatusCode: true,
+  includeUp: true,
+  customLabels: { project_name: 'lemonstand', project_type: 'test' },
+  promClient: {
+    collectDefaultMetrics: {
+      timeout: 1000,
+    }
   }
-};
+});
 
-// Periodic health checks
-setInterval(() => {
-  Object.entries(services).forEach(([serviceName, service]) => {
-    checkServiceHealth(serviceName, service.url);
+// Metrics endpoint
+const metricsEndpoint = (req, res) => {
+  res.set('Content-Type', client.register.contentType);
+  client.register.metrics().then(metrics => {
+    res.send(metrics);
+  }).catch(error => {
+    res.status(500).send(error);
   });
-}, 30000); // Check every 30 seconds
+};
 
-// Initial health check
-Object.entries(services).forEach(([serviceName, service]) => {
-  checkServiceHealth(serviceName, service.url);
-});
-
-// Registry endpoints
-app.get('/registry', (req, res) => {
-  res.json(services);
-});
-
-app.get('/registry/healthy', (req, res) => {
-  const healthyServices = Object.entries(services)
-    .filter(([_, service]) => service.healthy)
-    .reduce((acc, [name, service]) => {
-      acc[name] = service;
-      return acc;
-    }, {});
-  
-  res.json(healthyServices);
-});
-
-app.get('/registry/:serviceName', (req, res) => {
-  const service = services[req.params.serviceName];
-  if (!service) {
-    return res.status(404).json({ error: 'Service not found' });
-  }
-  res.json(service);
-});
-
-app.post('/registry/:serviceName', (req, res) => {
-  const { url } = req.body;
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
-  }
-  
-  services[req.params.serviceName] = {
-    url,
-    healthy: false,
-    lastChecked: new Date().toISOString()
-  };
-  
-  checkServiceHealth(req.params.serviceName, url);
-  res.json({ message: 'Service registered successfully' });
-});
-
-const PORT = process.env.PORT || 3006;
-app.listen(PORT, () => {
-  console.log(`Service Registry running on port ${PORT}`);
-});
+module.exports = {
+  metricsMiddleware,
+  metricsEndpoint,
+  httpRequestDurationMicroseconds,
+  httpRequestsTotal,
+  activeUsers,
+  client
+};
 EOF
 
-# Update API Gateway to use service registry
-cd ../api-gateway
-
-# Install axios for service discovery
-npm install axios
-
-# Update API Gateway to use service registry
+# Update API Gateway app to include monitoring
 cat > src/app.js << 'EOF'
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
@@ -116,6 +72,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const axios = require('axios');
+const { metricsMiddleware, metricsEndpoint } = require('./monitoring');
 
 const app = express();
 
@@ -124,6 +81,7 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10kb' }));
+app.use(metricsMiddleware);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -158,6 +116,9 @@ const serviceDiscovery = async (req, res, next) => {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', service: 'api-gateway' });
 });
+
+// Metrics endpoint
+app.get('/metrics', metricsEndpoint);
 
 // Proxy middleware with service discovery
 app.use('/api/v1/:service', serviceDiscovery, (req, res) => {
@@ -194,8 +155,73 @@ app.use((err, req, res, next) => {
 module.exports = app;
 EOF
 
+# Add monitoring to other services
+services=("auth-service" "products-service" "orders-service" "payments-service")
+for service in "${services[@]}"; do
+  cd ../$service
+  npm install prom-client express-prom-bundle
+  
+  # Create monitoring.js for each service
+  cat > src/monitoring.js << 'EOF'
+const promBundle = require('express-prom-bundle');
+const client = require('prom-client');
+
+// Create metrics
+const httpRequestDurationMicroseconds = new client.Histogram({
+  name: 'http_request_duration_ms',
+  help: 'Duration of HTTP requests in ms',
+  labelNames: ['method', 'route', 'code'],
+  buckets: [0.1, 5, 15, 50, 100, 300, 500, 1000, 3000, 5000]
+});
+
+// Metrics middleware
+const metricsMiddleware = promBundle({
+  includeMethod: true,
+  includePath: true,
+  includeStatusCode: true,
+  includeUp: true,
+  customLabels: { project_name: 'lemonstand', project_type: 'test' },
+  promClient: {
+    collectDefaultMetrics: {
+      timeout: 1000,
+    }
+  }
+});
+
+// Metrics endpoint
+const metricsEndpoint = (req, res) => {
+  res.set('Content-Type', client.register.contentType);
+  client.register.metrics().then(metrics => {
+    res.send(metrics);
+  }).catch(error => {
+    res.status(500).send(error);
+  });
+};
+
+module.exports = {
+  metricsMiddleware,
+  metricsEndpoint,
+  client
+};
+EOF
+
+  # Update app.js for each service to include monitoring
+  sed -i '' '/const express = require('\''express'\'');/a\
+const { metricsMiddleware, metricsEndpoint } = require('\''./monitoring'\'');\
+' src/app.js
+
+  sed -i '' '/app.use(express.json({ limit: '\''10kb'\'' }));/a\
+app.use(metricsMiddleware);\
+' src/app.js
+
+  sed -i '' '/app.get('\''\/health'\'', (req, res) => {/a\
+\
+app.get('\''\/metrics'\'', metricsEndpoint);\
+' src/app.js
+done
+
 git add .
-git commit -m "feat: add service registry and health checks for service discovery"
+git commit -m "feat: add Prometheus monitoring and metrics to all services"
 
 unset GIT_AUTHOR_DATE
 unset GIT_COMMITTER_DATE
