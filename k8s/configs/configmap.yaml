@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lemonstand-config
+  namespace: lemonstand
+data:
+  NODE_ENV: "production"
+  JWT_SECRET: "your_jwt_secret_here"
+  JWT_EXPIRES_IN: "90d"
+  STRIPE_SECRET_KEY: "your_stripe_secret_key_here"
+  STRIPE_WEBHOOK_SECRET: "your_stripe_webhook_secret_here"
+  REDIS_URL: "redis://redis:6379"
+  RABBITMQ_URL: "amqp://rabbitmq:5672"
+  REGISTRY_URL: "http://service-registry:3006"
