@@ -23,13 +23,13 @@ app.use(metricsMiddleware);
 app.use('/auth', authRoutes);
 app.use('/users', userRoutes);
 
-// Health check
+// Health check endpoint
 app.get('/health', (req, res) => {
-
-app.get('/metrics', metricsEndpoint);
-
   res.status(200).json({ status: 'OK', service: 'auth-service' });
 });
+
+// Metrics endpoint
+app.get('/metrics', metricsEndpoint);
 
 // 404 handler
 app.use('*', (req, res) => {

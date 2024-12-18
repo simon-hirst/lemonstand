@@ -23,13 +23,13 @@ app.use(metricsMiddleware);
 app.use('/products', productRoutes);
 app.use('/categories', categoryRoutes);
 
-// Health check
+// Health check endpoint
 app.get('/health', (req, res) => {
-
-app.get('/metrics', metricsEndpoint);
-
   res.status(200).json({ status: 'OK', service: 'products-service' });
 });
+
+// Metrics endpoint
+app.get('/metrics', metricsEndpoint);
 
 // 404 handler
 app.use('*', (req, res) => {

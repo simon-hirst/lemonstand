@@ -20,13 +20,13 @@ app.use(metricsMiddleware);
 // Routes
 app.use('/payments', paymentRoutes);
 
-// Health check
+// Health check endpoint
 app.get('/health', (req, res) => {
-
-app.get('/metrics', metricsEndpoint);
-
   res.status(200).json({ status: 'OK', service: 'payments-service' });
 });
+
+// Metrics endpoint
+app.get('/metrics', metricsEndpoint);
 
 // 404 handler
 app.use('*', (req, res) => {
