@@ -79,7 +79,5 @@ app.post('/registry/:serviceName', (req, res) => {
   res.json({ message: 'Service registered successfully' });
 });
 
-const PORT = process.env.PORT || 3006;
-app.listen(PORT, () => {
-  console.log(`Service Registry running on port ${PORT}`);
-});
+// Export the Express application for testing and external usage
+module.exports = app;
