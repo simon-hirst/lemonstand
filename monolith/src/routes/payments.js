@@ -1,6 +1,6 @@
 const express = require('express');
 const paymentController = require('../controllers/paymentController');
-const auth = require('../middleware/auth');
+const authController = require('../controllers/authController');
 
 const router = express.Router();
 
@@ -12,7 +12,7 @@ router.post(
 );
 
 // Protected routes
-router.use(auth.protect);
+router.use(authController.protect);
 
 router.post(
   '/create-payment-intent',
