@@ -1,7 +1,10 @@
-const redis = require('redis');
-const { promisify } = require('util');
+const { createClient } = require('redis');
 
-const redisClient = redis.createClient({
+/*
+ * Redis cache middleware using the modern redis@4 client.
+ * The client uses native promises so we can avoid util.promisify.
+ */
+const redisClient = createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
 
@@ -9,43 +12,49 @@ redisClient.on('error', (err) => {
   console.error('Redis error:', err);
 });
 
-const getAsync = promisify(redisClient.get).bind(redisClient);
-const setexAsync = promisify(redisClient.setex).bind(redisClient);
+// Ensure the client is connected before handling requests. If the
+// connection fails we still allow requests to proceed but skip caching.
+let clientReady = false;
+redisClient.connect().then(() => {
+  clientReady = true;
+}).catch((err) => {
+  console.error('Redis connection error:', err);
+});
 
-const cache = (duration = 300) => { // 5 minutes default
+const cache = (duration = 300) => {
   return async (req, res, next) => {
-    if (process.env.NODE_ENV === 'test') {
+    // Skip caching in test environment or if Redis connection failed.
+    if (process.env.NODE_ENV === 'test' || !clientReady) {
       return next();
     }
 
     const key = `cache:${req.originalUrl}`;
-    
     try {
-      const cachedData = await getAsync(key);
-      if (cachedData) {
+      const cached = await redisClient.get(key);
+      if (cached) {
         console.log('Cache hit for:', key);
-        return res.status(200).json(JSON.parse(cachedData));
+        return res.status(200).json(JSON.parse(cached));
       }
-      
-      // Cache miss - override res.json to cache response
-      const originalJson = res.json;
-      res.json = function(data) {
+
+      // Override res.json to intercept successful responses and store them in cache
+      const originalJson = res.json.bind(res);
+      res.json = async (data) => {
         if (res.statusCode === 200) {
-          setexAsync(key, duration, JSON.stringify(data))
-            .catch(err => console.error('Redis set error:', err));
+          try {
+            await redisClient.setEx(key, duration, JSON.stringify(data));
+          } catch (err) {
+            console.error('Redis setEx error:', err);
+          }
         }
-        originalJson.call(this, data);
+        return originalJson(data);
       };
-      
+
       next();
-    } catch (error) {
-      console.error('Cache middleware error:', error);
+    } catch (err) {
+      console.error('Cache middleware error:', err);
       next();
     }
   };
 };
-
-// Connect to Redis
-redisClient.connect().catch(console.error);
 
 module.exports = cache;

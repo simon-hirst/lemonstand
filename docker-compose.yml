@@ -1,85 +1,139 @@
 version: '3.8'
 
 services:
-  # API Gateway
-  api-gateway:
-    build: ./packages/api-gateway
+  # Database
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "27017:27017"
     environment:
-      - NODE_ENV=production
-      - AUTH_SERVICE_URL=http://auth-service:3001
-      - PRODUCTS_SERVICE_URL=http://products-service:3002
-      - ORDERS_SERVICE_URL=http://orders-service:3003
-      - PAYMENTS_SERVICE_URL=http://payments-service:3004
+      MONGO_INITDB_DATABASE: lemonstand
+    volumes:
+      - mongo_data:/data/db
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # RabbitMQ message broker with management UI
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672" # management UI
+
+  # Service registry responsible for service discovery and health monitoring
+  service-registry:
+    build: ./packages/service-registry
+    ports:
+      - "3006:3006"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:3001
+      PRODUCTS_SERVICE_URL: http://products-service:3002
+      ORDERS_SERVICE_URL: http://orders-service:3003
+      PAYMENTS_SERVICE_URL: http://payments-service:3004
+      EMAIL_SERVICE_URL: http://email-service:3005
     depends_on:
       - auth-service
       - products-service
       - orders-service
       - payments-service
-    restart: unless-stopped
+      - email-service
 
-  # Auth Service
+  # API Gateway routing external traffic to internal services
+  api-gateway:
+    build: ./packages/api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      REGISTRY_URL: http://service-registry:3006
+      NODE_ENV: production
+    depends_on:
+      - service-registry
+
+  # Authentication service
   auth-service:
     build: ./packages/auth-service
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=production
-      - MONGODB_URI=mongodb://mongo:27017/lemonstand-auth
-      - JWT_SECRET=your_jwt_secret_here
-      - JWT_EXPIRES_IN=90d
-      - EMAIL_HOST=smtp.gmail.com
-      - EMAIL_PORT=587
-      - EMAIL_USERNAME=your_email@gmail.com
-      - EMAIL_PASSWORD=your_email_password
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/lemonstand-auth
+      JWT_SECRET: supersecretjwt
+      JWT_EXPIRES_IN: 90d
+      EMAIL_HOST: smtp.example.com
+      EMAIL_PORT: 587
+      EMAIL_USERNAME: example@example.com
+      EMAIL_PASSWORD: examplepassword
     depends_on:
       - mongo
-    restart: unless-stopped
+      - redis
+      - rabbitmq
 
-  # Products Service (placeholder)
+  # Products service for catalog management
   products-service:
-    image: node:16-alpine
-    command: sh -c "echo 'Products service starting...' && sleep 3600"
+    build: ./packages/products-service
     ports:
       - "3002:3002"
-    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/lemonstand-products
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
 
-  # Orders Service (placeholder)
+  # Orders service for processing and fulfilling orders
   orders-service:
-    image: node:16-alpine
-    command: sh -c "echo 'Orders service starting...' && sleep 3600"
+    build: ./packages/orders-service
     ports:
       - "3003:3003"
-    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/lemonstand-orders
+      JWT_SECRET: supersecretjwt
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    depends_on:
+      - mongo
+      - rabbitmq
 
-  # Payments Service (placeholder)
+  # Payments service handling Stripe payments
   payments-service:
-    image: node:16-alpine
-    command: sh -c "echo 'Payments service starting...' && sleep 3600"
+    build: ./packages/payments-service
     ports:
       - "3004:3004"
-    restart: unless-stopped
-
-  # MongoDB
-  mongo:
-    image: mongo:5
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
     environment:
-      - MONGO_INITDB_DATABASE=lemonstand
-    restart: unless-stopped
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/lemonstand-payments
+      JWT_SECRET: supersecretjwt
+      STRIPE_SECRET_KEY: sk_test_your_stripe_secret
+      STRIPE_WEBHOOK_SECRET: whsec_your_webhook_secret
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    depends_on:
+      - mongo
+      - rabbitmq
 
-  # Redis
-  redis:
-    image: redis:6-alpine
+  # Email service for asynchronous notifications
+  email-service:
+    build: ./packages/email-service
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
+      - "3005:3005"
+    environment:
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      SMTP_HOST: smtp.example.com
+      SMTP_PORT: 587
+      SMTP_USER: example@example.com
+      SMTP_PASS: examplepassword
+    depends_on:
+      - rabbitmq
 
 volumes:
   mongo_data:

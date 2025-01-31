@@ -7,4 +7,7 @@ RUN npm install --production
 
 COPY . .
 
+# Expose default port for payments service
+EXPOSE 3004
+
 CMD ["node", "src/server.js"]

@@ -7,4 +7,7 @@ RUN npm install --production
 
 COPY . .
 
+# Service registry listens on port 3006
+EXPOSE 3006
+
 CMD ["node", "src/server.js"]

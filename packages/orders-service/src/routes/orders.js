@@ -1,7 +1,11 @@
 const express = require('express');
 const orderController = require('../controllers/orderController');
+const protect = require('../middleware/auth');
 
 const router = express.Router();
+
+// Protect all order routes - require authentication
+router.use(protect);
 
 router
   .route('/')
