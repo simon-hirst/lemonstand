@@ -1,24 +1,36 @@
 {
-  "name": "@lemonstand/email-service",
+  "name": "@lemonstand/monolith",
   "version": "0.0.0",
   "description": "Now I’m the model of a modern major general / The venerated Virginian veteran whose men are all / Lining up, to put me up on a pedestal / Writin’ letters to relatives / Embellishin’ my elegance and eloquence / But the elephant is in the room / The truth is in ya face when ya hear the British cannons go / BOOM",
   "keywords": [],
   "author": "simon <simonhirst@pm.me>",
   "license": "ISC",
-  "main": "src/server.js",
+  "main": "lib/monolith.js",
+  "directories": {
+    "lib": "lib",
+    "test": "__tests__"
+  },
+  "files": [
+    "lib"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
-    "test": "jest"
+    "test": "jest --testTimeout=30000 --detectOpenHandles",
+    "test:watch": "jest --watch --testTimeout=30000 --detectOpenHandles"
   },
   "dependencies": {
-    "amqplib": "^0.10.3",
     "nodemailer": "^7.0.5",
-    "dotenv": "^17.2.1"
+    "slugify": "^1.6.6",
+    "validator": "^13.15.15"
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "supertest": "^7.1.4",
-    "nodemon": "^3.1.10"
+    "mongodb-memory-server": "^10.2.0",
+    "supertest": "^7.1.4"
+  },
+  "jest": {
+    "setupFilesAfterEnv": "[\"<rootDir>/src/tests/setup.js\"]"
   }
 }
