@@ -1,83 +1,59 @@
 const express = require('express');
+const morgan = require('morgan');
+const cors = require('cors');
+const helmet = require('helmet');
 const axios = require('axios');
 
 const app = express();
-app.use(express.json());
+app.use(helmet());
+app.use(cors());
+app.use(morgan('combined'));
+app.use(express.json({ limit: '10kb' }));
 
-// Service registry
+// In-memory registry (simple shape for demo/tests)
 const services = {
-  'auth-service': { url: process.env.AUTH_SERVICE_URL || 'http://localhost:3001', healthy: false },
-  'products-service': { url: process.env.PRODUCTS_SERVICE_URL || 'http://localhost:3002', healthy: false },
-  'orders-service': { url: process.env.ORDERS_SERVICE_URL || 'http://localhost:3003', healthy: false },
-  'payments-service': { url: process.env.PAYMENTS_SERVICE_URL || 'http://localhost:3004', healthy: false },
-  'email-service': { url: process.env.EMAIL_SERVICE_URL || 'http://localhost:3005', healthy: false }
+  'auth-service':     { url: process.env.AUTH_URL     || 'http://auth-service:3001/health',     healthy: false, lastChecked: null },
+  'products-service': { url: process.env.PRODUCTS_URL || 'http://products-service:3002/health', healthy: false, lastChecked: null },
+  'orders-service':   { url: process.env.ORDERS_URL   || 'http://orders-service:3003/health',   healthy: false, lastChecked: null },
+  'payments-service': { url: process.env.PAYMENTS_URL || 'http://payments-service:3004/health', healthy: false, lastChecked: null },
+  'email-service':    { url: process.env.EMAIL_URL    || 'http://email-service:3005/health',    healthy: false, lastChecked: null },
 };
 
-// Health check function
-const checkServiceHealth = async (serviceName, serviceUrl) => {
-  try {
-    const response = await axios.get(`${serviceUrl}/health`, { timeout: 5000 });
-    services[serviceName].healthy = response.status === 200;
-    services[serviceName].lastChecked = new Date().toISOString();
-    console.log(`Service ${serviceName} is healthy`);
-  } catch (error) {
-    services[serviceName].healthy = false;
-    services[serviceName].lastChecked = new Date().toISOString();
-    console.error(`Service ${serviceName} is unhealthy:`, error.message);
-  }
-};
-
-// Periodic health checks
-setInterval(() => {
-  Object.entries(services).forEach(([serviceName, service]) => {
-    checkServiceHealth(serviceName, service.url);
-  });
-}, 30000); // Check every 30 seconds
-
-// Initial health check
-Object.entries(services).forEach(([serviceName, service]) => {
-  checkServiceHealth(serviceName, service.url);
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', service: 'service-registry' });
 });
 
-// Registry endpoints
-app.get('/registry', (req, res) => {
+// Registry view
+app.get('/registry', (_req, res) => {
   res.json(services);
 });
 
-app.get('/registry/healthy', (req, res) => {
-  const healthyServices = Object.entries(services)
-    .filter(([_, service]) => service.healthy)
-    .reduce((acc, [name, service]) => {
-      acc[name] = service;
-      return acc;
-    }, {});
-  
-  res.json(healthyServices);
-});
-
-app.get('/registry/:serviceName', (req, res) => {
-  const service = services[req.params.serviceName];
-  if (!service) {
-    return res.status(404).json({ error: 'Service not found' });
+// Optional periodic health poller (disabled in tests)
+async function checkService(serviceName) {
+  const s = services[serviceName];
+  if (!s) return;
+  try {
+    const { status } = await axios.get(s.url, { timeout: 1500 });
+    s.healthy = status >= 200 && status < 300;
+    s.lastChecked = new Date().toISOString();
+  } catch (error) {
+    s.healthy = false;
+    s.lastChecked = new Date().toISOString();
+    if (process.env.NODE_ENV !== 'test') {
+      console.error(`Service ${serviceName} is unhealthy:`, error.message);
+    }
   }
-  res.json(service);
-});
+}
 
-app.post('/registry/:serviceName', (req, res) => {
-  const { url } = req.body;
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
-  }
-  
-  services[req.params.serviceName] = {
-    url,
-    healthy: false,
-    lastChecked: new Date().toISOString()
-  };
-  
-  checkServiceHealth(req.params.serviceName, url);
-  res.json({ message: 'Service registered successfully' });
-});
+async function pollAll() {
+  await Promise.all(Object.keys(services).map(checkService));
+}
 
-// Export the Express application for testing and external usage
+if (!process.env.DISABLE_HEALTH_POLL) {
+  setInterval(pollAll, 30000); // 30s
+  // kick one off shortly after boot without blocking require()
+  setTimeout(() => { pollAll().catch(() => {}); }, 10);
+}
+
 module.exports = app;
