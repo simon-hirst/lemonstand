@@ -1,140 +1,180 @@
-version: '3.8'
+name: lemonstand
+
+networks:
+  default:
+    name: lemonstand-net
+
+volumes:
+  mongo-data:
+  rabbitmq-data:
 
 services:
-  # Database
   mongo:
     image: mongo:7
     restart: unless-stopped
-    ports:
-      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
     environment:
       MONGO_INITDB_DATABASE: lemonstand
-    volumes:
-      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
-  # Redis cache
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
 
-  # RabbitMQ message broker with management UI
   rabbitmq:
     image: rabbitmq:3-management-alpine
     restart: unless-stopped
     ports:
       - "5672:5672"
-      - "15672:15672" # management UI
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
-  # Service registry responsible for service discovery and health monitoring
-  service-registry:
-    build: ./packages/service-registry
-    ports:
-      - "3006:3006"
-    environment:
-      AUTH_SERVICE_URL: http://auth-service:3001
-      PRODUCTS_SERVICE_URL: http://products-service:3002
-      ORDERS_SERVICE_URL: http://orders-service:3003
-      PAYMENTS_SERVICE_URL: http://payments-service:3004
-      EMAIL_SERVICE_URL: http://email-service:3005
-    depends_on:
-      - auth-service
-      - products-service
-      - orders-service
-      - payments-service
-      - email-service
-
-  # API Gateway routing external traffic to internal services
-  api-gateway:
-    build: ./packages/api-gateway
-    ports:
-      - "3000:3000"
-    environment:
-      REGISTRY_URL: http://service-registry:3006
-      NODE_ENV: production
-    depends_on:
-      - service-registry
-
-  # Authentication service
+  # auth-service
   auth-service:
-    build: ./packages/auth-service
-    ports:
-      - "3001:3001"
+    build: { context: ./packages/auth-service }
+    restart: unless-stopped
     environment:
       NODE_ENV: production
-      MONGODB_URI: mongodb://mongo:27017/lemonstand-auth
-      JWT_SECRET: supersecretjwt
-      JWT_EXPIRES_IN: 90d
-      EMAIL_HOST: smtp.example.com
-      EMAIL_PORT: 587
-      EMAIL_USERNAME: example@example.com
-      EMAIL_PASSWORD: examplepassword
+      MONGO_URL: mongodb://mongo:27017/lemonstand-auth
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
     depends_on:
-      - mongo
-      - redis
-      - rabbitmq
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"net=require('net');s=net.connect(3000,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
 
-  # Products service for catalog management
+# products-service
   products-service:
-    build: ./packages/products-service
-    ports:
-      - "3002:3002"
+    build: { context: ./packages/products-service }
+    restart: unless-stopped
     environment:
       NODE_ENV: production
-      MONGODB_URI: mongodb://mongo:27017/lemonstand-products
+      MONGO_URL: mongodb://mongo:27017/lemonstand-products
       REDIS_URL: redis://redis:6379
     depends_on:
-      - mongo
-      - redis
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"net=require('net');s=net.connect(3000,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
 
-  # Orders service for processing and fulfilling orders
+# orders-service
   orders-service:
-    build: ./packages/orders-service
-    ports:
-      - "3003:3003"
+    build: { context: ./packages/orders-service }
+    restart: unless-stopped
     environment:
       NODE_ENV: production
-      MONGODB_URI: mongodb://mongo:27017/lemonstand-orders
-      JWT_SECRET: supersecretjwt
-      RABBITMQ_URL: amqp://rabbitmq:5672
+      MONGO_URL: mongodb://mongo:27017/lemonstand-orders
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
-      - mongo
-      - rabbitmq
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"net=require('net');s=net.connect(3000,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
 
-  # Payments service handling Stripe payments
+# payments-service
   payments-service:
-    build: ./packages/payments-service
-    ports:
-      - "3004:3004"
+    build: { context: ./packages/payments-service }
+    restart: unless-stopped
     environment:
       NODE_ENV: production
-      MONGODB_URI: mongodb://mongo:27017/lemonstand-payments
-      JWT_SECRET: supersecretjwt
-      STRIPE_SECRET_KEY: sk_test_your_stripe_secret
-      STRIPE_WEBHOOK_SECRET: whsec_your_webhook_secret
-      RABBITMQ_URL: amqp://rabbitmq:5672
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
     depends_on:
-      - mongo
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"net=require('net');s=net.connect(3000,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
 
-  # Email service for asynchronous notifications
+# email-service (worker-style; keep lightweight check)
   email-service:
-    build: ./packages/email-service
-    ports:
-      - "3005:3005"
+    build: { context: ./packages/email-service }
+    restart: unless-stopped
     environment:
       NODE_ENV: production
-      RABBITMQ_URL: amqp://rabbitmq:5672
-      SMTP_HOST: smtp.example.com
-      SMTP_PORT: 587
-      SMTP_USER: example@example.com
-      SMTP_PASS: examplepassword
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -v >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
-volumes:
-  mongo_data:
-  redis_data:
+# api-gateway
+  api-gateway:
+    build: { context: ./packages/api-gateway }
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AUTH_URL: http://auth-service:3000
+      PRODUCTS_URL: http://products-service:3000
+      ORDERS_URL: http://orders-service:3000
+      PAYMENTS_URL: http://payments-service:3000
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      products-service:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+      payments-service:
+        condition: service_healthy
+    ports: ["3000:3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"net=require('net');s=net.connect(process.env.PORT||3000,'127.0.0.1');s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
