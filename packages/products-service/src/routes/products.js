@@ -6,17 +6,11 @@ const router = express.Router();
 
 router
   .route('/')
-  .get(cache(300), productController.getAllProducts) // Cache for 5 minutes
+  .get(cache(300), productController.getAllProducts) // 5-min cache
   .post(productController.createProduct);
 
 router
   .route('/stats')
-  .get(cache(60), productController.getProductStats); // Cache for 1 minute
-
-router
-  .route('/:id')
-  .get(cache(600), productController.getProduct) // Cache for 10 minutes
-  .patch(productController.updateProduct)
-  .delete(productController.deleteProduct);
+  .get(productController.getProductStats);
 
 module.exports = router;

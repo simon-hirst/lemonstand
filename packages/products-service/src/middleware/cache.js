@@ -1,60 +1,72 @@
+// Test-friendly Redis cache middleware (supports cache() and cache(ttl))
 const { createClient } = require('redis');
 
-/*
- * Redis cache middleware using the modern redis@4 client.
- * The client uses native promises so we can avoid util.promisify.
- */
-const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
+const DISABLE_CACHE = process.env.NODE_ENV === 'test' || process.env.SKIP_REDIS === '1';
+let redisClient = null;
 
-redisClient.on('error', (err) => {
-  console.error('Redis error:', err);
-});
+if (!DISABLE_CACHE && process.env.REDIS_URL) {
+  redisClient = createClient({
+    url: process.env.REDIS_URL,
+    socket: { reconnectStrategy: false },
+  });
 
-// Ensure the client is connected before handling requests. If the
-// connection fails we still allow requests to proceed but skip caching.
-let clientReady = false;
-redisClient.connect().then(() => {
-  clientReady = true;
-}).catch((err) => {
-  console.error('Redis connection error:', err);
-});
-
-const cache = (duration = 300) => {
-  return async (req, res, next) => {
-    // Skip caching in test environment or if Redis connection failed.
-    if (process.env.NODE_ENV === 'test' || !clientReady) {
-      return next();
+  redisClient.on('error', (err) => {
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('Redis error:', err);
     }
+  });
 
-    const key = `cache:${req.originalUrl}`;
+  redisClient.connect().catch((err) => {
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('Redis connect failed, continuing without cache:', err && err.message ? err.message : err);
+    }
+    redisClient = null;
+  });
+}
+
+function createCacheMiddleware(ttlSeconds = 60) {
+  return async function cacheMiddleware(req, res, next) {
     try {
+      if (!redisClient || !redisClient.isOpen) return next();
+
+      const key = `products:${req.method}:${req.originalUrl}`;
       const cached = await redisClient.get(key);
       if (cached) {
-        console.log('Cache hit for:', key);
-        return res.status(200).json(JSON.parse(cached));
+        res.set('X-Cache', 'HIT');
+        return res.json(JSON.parse(cached));
       }
 
-      // Override res.json to intercept successful responses and store them in cache
-      const originalJson = res.json.bind(res);
-      res.json = async (data) => {
-        if (res.statusCode === 200) {
-          try {
-            await redisClient.setEx(key, duration, JSON.stringify(data));
-          } catch (err) {
-            console.error('Redis setEx error:', err);
-          }
-        }
-        return originalJson(data);
+      const _json = res.json.bind(res);
+      res.json = (body) => {
+        try {
+          redisClient.setEx(key, ttlSeconds, JSON.stringify(body)).catch(() => {});
+          res.set('X-Cache', 'MISS');
+        } catch (_) {}
+        return _json(body);
       };
 
-      next();
-    } catch (err) {
-      console.error('Cache middleware error:', err);
-      next();
+      return next();
+    } catch (_err) {
+      return next();
     }
   };
-};
+}
+
+// Export a callable that supports both usages:
+//   router.get('/', cache, handler)
+//   router.get('/', cache(300), handler)
+function cache(...args) {
+  // cache(300) -> returns a middleware
+  if (args.length === 1 && typeof args[0] === 'number') {
+    return createCacheMiddleware(args[0]);
+  }
+  // Express calling cache(req,res,next)
+  if (args.length >= 3) {
+    return createCacheMiddleware()(args[0], args[1], args[2]);
+  }
+  // Fallback: return default middleware
+  return createCacheMiddleware();
+}
 
 module.exports = cache;
+module.exports.cache = cache;
