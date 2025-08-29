@@ -97,11 +97,3 @@ curl http://localhost:3000/api/v1/products/products
 ### Health checks and metrics
 
 Each service exposes a `/health` endpoint that returns a simple JSON payload indicating that the service is running. Prometheus‑formatted metrics are available on `/metrics` and can be scraped by a Prometheus server. The service registry polls each service’s health endpoint every 30 seconds and stores the results; the API gateway queries the registry to discover the location and health of services at runtime.
-
-## Contributing
-
-Contributions are welcome! If you would like to add features or fix bugs, please fork the repository and open a pull request. Commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) format. Be sure to run the test suite and lint your code (`npm run lint`) before submitting.
-
-## License
-
-This project is licensed under the MIT license. See the `LICENSE` file for details.
